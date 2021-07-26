@@ -107,7 +107,7 @@ contract IBAgreement {
      * @param _amount The borrow amount
      */
     function borrow(uint _amount) external onlyBorrower {
-        require(this.hypotheticalDebtUSD(_amount) < this.collateralUSD(), "undercollateralized");
+        require(this.hypotheticalDebtUSD(_amount) <= this.collateralUSD(), "undercollateralized");
         require(cy.borrow(_amount) == 0, "borrow failed");
         underlying.safeTransfer(borrower, _amount);
     }
@@ -117,7 +117,7 @@ contract IBAgreement {
      * @param _amount The withdraw amount
      */
     function withdraw(uint _amount) external onlyBorrower {
-        require(this.debtUSD() < this.hypotheticalCollateralUSD(_amount), "undercollateralized");
+        require(this.debtUSD() <= this.hypotheticalCollateralUSD(_amount), "undercollateralized");
         collateral.safeTransfer(borrower, _amount);
     }
 
@@ -127,7 +127,7 @@ contract IBAgreement {
     function repay() external {
         uint _balance = underlying.balanceOf(address(this));
         underlying.safeApprove(address(cy), _balance);
-        require(cy.repayBorrow(_balance) == 0, "reapy failed");
+        require(cy.repayBorrow(_balance) == 0, "repay failed");
     }
 
     /**
@@ -163,7 +163,10 @@ contract IBAgreement {
      * @param _converter The new converter
      */
     function setConverter(address _converter) external onlyGovernor {
+        require(_converter != address(0), "empty converter");
         converter = IConverter(_converter);
+        require(converter.source() == address(collateral), "mismatch source token");
+        require(converter.destination() == address(underlying), "mismatch destination token");
     }
 
     /**
