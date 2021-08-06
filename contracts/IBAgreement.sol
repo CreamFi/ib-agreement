@@ -22,7 +22,8 @@ contract IBAgreement {
     IConverter public converter;
     IPriceFeed public priceFeed;
 
-    uint public constant collateralFactor = 5e17;
+    uint public constant collateralFactor = 0.5e18;
+    uint public constant liquidationFactor = 0.75e18;
 
     modifier onlyBorrower() {
         require(msg.sender == borrower, "caller is not the borrower");
@@ -103,6 +104,16 @@ contract IBAgreement {
     }
 
     /**
+     * @notice Get the lquidation threshold. It represents the max value of collateral that we recongized.
+     * @dev If the debt is greater than the liquidation threshold, this agreement is liquidatable.
+     * @return The lquidation threshold
+     */
+    function liquidationThreshold() external view returns (uint) {
+        uint normalizedAmount = collateral.balanceOf(address(this)) * 10**(18 - IERC20Metadata(address(collateral)).decimals());
+        return normalizedAmount * priceFeed.getPrice() / 1e18 * liquidationFactor / 1e18;
+    }
+
+    /**
      * @notice Borrow from cyToken if the collateral if sufficient
      * @param _amount The borrow amount
      */
@@ -145,7 +156,7 @@ contract IBAgreement {
      * @param amount The liquidate amount
      */
     function liquidate(uint amount) external onlyExecutor {
-        require(this.debtUSD() > this.collateralUSD(), "overcollateralized");
+        require(this.debtUSD() > this.liquidationThreshold(), "not liquidatable");
         require(address(converter) != address(0), "empty converter");
         require(converter.source() == address(collateral), "mismatch source token");
         require(converter.destination() == address(underlying), "mismatch destination token");
