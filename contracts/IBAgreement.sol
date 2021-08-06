@@ -23,6 +23,7 @@ contract IBAgreement {
     IPriceFeed public priceFeed;
 
     uint public constant collateralFactor = 5e17;
+    uint public constant liquidationThreshold = 75e16;
 
     modifier onlyBorrower() {
         require(msg.sender == borrower, "caller is not the borrower");
@@ -92,6 +93,15 @@ contract IBAgreement {
         return normalizedAmount * priceFeed.getPrice() / 1e18 * collateralFactor / 1e18;
     }
 
+     /**
+     * @notice Check if the debt reachs liquidation threshold
+     * @return True if liquidation threshold reached
+     */
+     function isLiquidatable() external view returns (uint) {
+        uint normalizedAmount = collateral.balanceOf(address(this)) * 10**(18 - IERC20Metadata(address(collateral)).decimals());
+        return normalizedAmount * priceFeed.getPrice() / 1e18 * liquidationThreshold / 1e18;
+    }
+
     /**
      * @notice Get the hypothetical collateral in USD value in this contract after withdraw
      * @param withdrawAmount The hypothetical withdraw amount
@@ -145,7 +155,7 @@ contract IBAgreement {
      * @param amount The liquidate amount
      */
     function liquidate(uint amount) external onlyExecutor {
-        require(this.debtUSD() > this.collateralUSD(), "overcollateralized");
+        require(isLiquidatable(), "liquidate threshold not reached");
         require(address(converter) != address(0), "empty converter");
         require(converter.source() == address(collateral), "mismatch source token");
         require(converter.destination() == address(underlying), "mismatch destination token");
