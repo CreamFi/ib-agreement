@@ -41,19 +41,22 @@ contract IBAgreement {
     }
 
     /**
-     * @dev Sets the values for {executor}, {borrower}, {governor}, {cy}, and {collateral}.
+     * @dev Sets the values for {executor}, {borrower}, {governor}, {cy}, {collateral}, and {priceFeed}.
      *
      * {collateral} must be a vanilla ERC20 token and {cy} must be a valid IronBank market.
      *
-     * All two of these values are immutable: they can only be set once during construction.
+     * All of these values are immutable: they can only be set once during construction.
      */
-    constructor(address _executor, address _borrower, address _governor, address _cy, address _collateral) {
+    constructor(address _executor, address _borrower, address _governor, address _cy, address _collateral, address _priceFeed) {
         executor = _executor;
         borrower = _borrower;
         governor = _governor;
         cy = ICToken(_cy);
         underlying = IERC20(ICToken(_cy).underlying());
         collateral = IERC20(_collateral);
+        priceFeed = IPriceFeed(_priceFeed);
+
+        require(_collateral == priceFeed.getToken(), "mismatch price feed");
     }
 
     /**
@@ -185,6 +188,8 @@ contract IBAgreement {
      * @param _priceFeed The new price feed
      */
     function setPriceFeed(address _priceFeed) external onlyGovernor {
+        require(address(collateral) == IPriceFeed(_priceFeed).getToken(), "mismatch price feed");
+
         priceFeed = IPriceFeed(_priceFeed);
     }
 }
