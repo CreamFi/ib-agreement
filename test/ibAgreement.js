@@ -1,8 +1,9 @@
 const { expect } = require("chai");
-const { ethers, waffle } = require("hardhat");
+const { ethers } = require("hardhat");
 
 describe("IBAgreement", () => {
   const toWei = ethers.utils.parseEther;
+  const usdAddress = '0x0000000000000000000000000000000000000348';
 
   let accounts;
   let executor, executorAddress;
@@ -16,7 +17,7 @@ describe("IBAgreement", () => {
   let priceOracle;
   let comptroller;
   let collateral;
-  let aggregator;
+  let registry;
   let priceFeed;
   let token;
   let converter;
@@ -39,7 +40,7 @@ describe("IBAgreement", () => {
     const cyTokenFactory = await ethers.getContractFactory("MockCyToken");
     const priceOracleFactory = await ethers.getContractFactory("MockPriceOralce");
     const comptrollerFactory = await ethers.getContractFactory("MockComptroller");
-    const aggregatorFactory = await ethers.getContractFactory("MockAggregator");
+    const registryFactory = await ethers.getContractFactory("MockRegistry");
     const priceFeedFactory = await ethers.getContractFactory("PriceFeed");
     const converterFactory = await ethers.getContractFactory("MockConverter");
 
@@ -48,10 +49,10 @@ describe("IBAgreement", () => {
     underlying = await tokenFactory.deploy("USD Tether", "USDT", 6);
     cyToken = await cyTokenFactory.deploy(comptroller.address, underlying.address);
     collateral = await tokenFactory.deploy("Wrapped BTC", "WBTC", 8);
-    ibAgreement = await ibAgreementFactory.deploy(executorAddress, borrowerAddress, governorAddress, cyToken.address, collateral.address);
+    registry = await registryFactory.deploy();
+    priceFeed = await priceFeedFactory.deploy(registry.address, collateral.address, collateral.address, usdAddress);
+    ibAgreement = await ibAgreementFactory.deploy(executorAddress, borrowerAddress, governorAddress, cyToken.address, collateral.address, priceFeed.address);
 
-    aggregator = await aggregatorFactory.deploy();
-    priceFeed = await priceFeedFactory.deploy(aggregator.address);
     token = await tokenFactory.deploy("Cream", "CREAM", 18);
     converter = await converterFactory.deploy(collateral.address, underlying.address);
     invalidConverter1 = await converterFactory.deploy(token.address, underlying.address);
@@ -90,7 +91,7 @@ describe("IBAgreement", () => {
     beforeEach(async () => {
       await Promise.all([
         collateral.mint(ibAgreement.address, amount),
-        aggregator.setPrice(price),
+        registry.setPrice(collateral.address, usdAddress, price),
         ibAgreement.connect(governor).setPriceFeed(priceFeed.address)
       ]);
     });
@@ -118,7 +119,7 @@ describe("IBAgreement", () => {
     beforeEach(async () => {
       await Promise.all([
         collateral.mint(ibAgreement.address, collateralAmount),
-        aggregator.setPrice(collateralPrice),
+        registry.setPrice(collateral.address, usdAddress, collateralPrice),
         ibAgreement.connect(governor).setPriceFeed(priceFeed.address),
         priceOracle.setUnderlyingPrice(cyToken.address, borrowPrice)
       ]);
@@ -219,7 +220,7 @@ describe("IBAgreement", () => {
     beforeEach(async () => {
       await Promise.all([
         collateral.mint(ibAgreement.address, collateralAmount),
-        aggregator.setPrice(collateralPrice),
+        registry.setPrice(collateral.address, usdAddress, collateralPrice),
         ibAgreement.connect(governor).setPriceFeed(priceFeed.address),
         priceOracle.setUnderlyingPrice(cyToken.address, borrowPrice)
       ]);
@@ -232,14 +233,14 @@ describe("IBAgreement", () => {
     it('liquidates successfully', async () => {
       const newCollateralPrice = '2666600000000'; // 26666 * 1e8
       const amount = 0.1 * 1e8; // 0.1 wBTC
-      await aggregator.setPrice(newCollateralPrice);
+      await registry.setPrice(collateral.address, usdAddress, newCollateralPrice);
       expect(await ibAgreement.collateralUSD()).to.eq(toWei('13333')); // $26666, CF: 50%, $13333
       expect(await ibAgreement.liquidationThreshold()).to.eq(toWei('19999.5')); // $26666, LF: 50%, $19999.5
       expect(await ibAgreement.debtUSD()).to.eq(toWei('20000')); // $20000 > $19999.5, liquidatable
 
       await ibAgreement.connect(governor).setConverter(converter.address);
       await ibAgreement.connect(executor).liquidate(amount);
-      await aggregator.setPrice(collateralPrice);
+      await registry.setPrice(collateral.address, usdAddress, collateralPrice);
       expect(await ibAgreement.collateralUSD()).to.eq(toWei('18000')); // 0.9 wBTC remain, $36000, CF: 50%, $18000
       expect(await ibAgreement.liquidationThreshold()).to.eq(toWei('27000')); // 0.9 wBTC remain, $36000, LF: 75%, $27000
       expect(await ibAgreement.debtUSD()).to.eq(toWei('16000')); // liquidate 0.1 wBTC for $4000, debts: $20000 - $4000 = $16000
@@ -260,7 +261,7 @@ describe("IBAgreement", () => {
       expect(await ibAgreement.debtUSD()).to.eq(toWei('20000'));
 
       const newCollateralPrice = '2666700000000'; // 26667 * 1e8
-      await aggregator.setPrice(newCollateralPrice);
+      await registry.setPrice(collateral.address, usdAddress, newCollateralPrice);
       await expect(ibAgreement.connect(executor).liquidate(amount)).to.be.revertedWith('not liquidatable');
       expect(await ibAgreement.collateralUSD()).to.eq(toWei('13333.5')); // CF: 50%
       expect(await ibAgreement.liquidationThreshold()).to.eq(toWei('20000.25')); // LF: 75%
@@ -272,10 +273,10 @@ describe("IBAgreement", () => {
 
       const newCollateralPrice = '2666600000000'; // 26666 * 1e8
       const amount = 0.1 * 1e8; // 0.1 wBTC
-      await aggregator.setPrice(newCollateralPrice);
+      await registry.setPrice(collateral.address, usdAddress, newCollateralPrice);
       await ibAgreement.connect(governor).setConverter(converter.address);
       await expect(ibAgreement.connect(executor).liquidate(amount)).to.be.revertedWith('repay failed');
-      await aggregator.setPrice(collateralPrice);
+      await registry.setPrice(collateral.address, usdAddress, collateralPrice);
       expect(await ibAgreement.collateralUSD()).to.eq(toWei('20000'));
       expect(await ibAgreement.debtUSD()).to.eq(toWei('20000'));
     });
