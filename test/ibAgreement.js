@@ -5,6 +5,9 @@ describe("IBAgreement", () => {
   const toWei = ethers.utils.parseEther;
   const usdAddress = '0x0000000000000000000000000000000000000348';
 
+  const collateralFactor = toWei('0.5');
+  const liquidationFactor = toWei('0.75');
+
   let accounts;
   let executor, executorAddress;
   let borrower, borrowerAddress;
@@ -51,7 +54,7 @@ describe("IBAgreement", () => {
     collateral = await tokenFactory.deploy("Wrapped BTC", "WBTC", 8);
     registry = await registryFactory.deploy();
     priceFeed = await priceFeedFactory.deploy(registry.address, collateral.address, collateral.address, usdAddress);
-    ibAgreement = await ibAgreementFactory.deploy(executorAddress, borrowerAddress, governorAddress, cyToken.address, collateral.address, priceFeed.address);
+    ibAgreement = await ibAgreementFactory.deploy(executorAddress, borrowerAddress, governorAddress, cyToken.address, collateral.address, priceFeed.address, collateralFactor, liquidationFactor);
 
     token = await tokenFactory.deploy("Cream", "CREAM", 18);
     converter = await converterFactory.deploy(collateral.address, underlying.address);

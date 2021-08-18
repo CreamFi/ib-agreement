@@ -19,11 +19,10 @@ contract IBAgreement {
     ICToken public immutable cy;
     IERC20 public immutable underlying;
     IERC20 public immutable collateral;
+    uint public immutable collateralFactor;
+    uint public immutable liquidationFactor;
     IConverter public converter;
     IPriceFeed public priceFeed;
-
-    uint public constant collateralFactor = 0.5e18;
-    uint public constant liquidationFactor = 0.75e18;
 
     modifier onlyBorrower() {
         require(msg.sender == borrower, "caller is not the borrower");
@@ -41,13 +40,13 @@ contract IBAgreement {
     }
 
     /**
-     * @dev Sets the values for {executor}, {borrower}, {governor}, {cy}, {collateral}, and {priceFeed}.
+     * @dev Sets the values for {executor}, {borrower}, {governor}, {cy}, {collateral}, {priceFeed}, {collateralFactor}, and {liquidationFactor}.
      *
      * {collateral} must be a vanilla ERC20 token and {cy} must be a valid IronBank market.
      *
      * All of these values are immutable: they can only be set once during construction.
      */
-    constructor(address _executor, address _borrower, address _governor, address _cy, address _collateral, address _priceFeed) {
+    constructor(address _executor, address _borrower, address _governor, address _cy, address _collateral, address _priceFeed, uint _collateralFactor, uint _liquidationFactor) {
         executor = _executor;
         borrower = _borrower;
         governor = _governor;
@@ -55,8 +54,12 @@ contract IBAgreement {
         underlying = IERC20(ICToken(_cy).underlying());
         collateral = IERC20(_collateral);
         priceFeed = IPriceFeed(_priceFeed);
+        collateralFactor = _collateralFactor;
+        liquidationFactor = _liquidationFactor;
 
         require(_collateral == priceFeed.getToken(), "mismatch price feed");
+        require(_collateralFactor > 0 && _collateralFactor <= 1e18, "invalid collateral factor");
+        require(_liquidationFactor >= _collateralFactor && _liquidationFactor <= 1e18, "invalid liquidation factor");
     }
 
     /**
