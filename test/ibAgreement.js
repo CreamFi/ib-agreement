@@ -41,7 +41,7 @@ describe("IBAgreement", () => {
     const priceOracleFactory = await ethers.getContractFactory("MockPriceOralce");
     const comptrollerFactory = await ethers.getContractFactory("MockComptroller");
     const registryFactory = await ethers.getContractFactory("MockRegistry");
-    const priceFeedFactory = await ethers.getContractFactory("PriceFeed");
+    const priceFeedFactory = await ethers.getContractFactory("ChainlinkPriceFeed");
     const converterFactory = await ethers.getContractFactory("MockConverter");
 
     priceOracle = await priceOracleFactory.deploy();

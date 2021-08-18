@@ -1,7 +1,7 @@
 const { expect } = require("chai");
 const { ethers } = require("hardhat");
 
-describe("PriceFeed", () => {
+describe("ChainlinkPriceFeed", () => {
   const toWei = ethers.utils.parseEther;
   const usdAddress = '0x0000000000000000000000000000000000000348';
   const ethAddress = '0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE';
@@ -20,7 +20,7 @@ describe("PriceFeed", () => {
 
     tokenFactory = await ethers.getContractFactory("MockToken");
     registryFactory = await ethers.getContractFactory("MockRegistry");
-    priceFeedFactory = await ethers.getContractFactory("PriceFeed");
+    priceFeedFactory = await ethers.getContractFactory("ChainlinkPriceFeed");
   });
 
   it('get price (USD quote)', async () => {

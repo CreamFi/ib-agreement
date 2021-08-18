@@ -4,9 +4,9 @@ pragma solidity ^0.8.0;
 
 import "@chainlink/contracts/src/v0.8/interfaces/FeedRegistryInterface.sol";
 import "@chainlink/contracts/src/v0.8/Denominations.sol";
-import "./interfaces/IPriceFeed.sol";
+import "../interfaces/IPriceFeed.sol";
 
-contract PriceFeed is IPriceFeed {
+contract ChainlinkPriceFeed is IPriceFeed {
     address public registry;
     address public token;
     address public base;
