@@ -62,7 +62,7 @@ describe("IBAgreement", () => {
     invalidConverter2 = await converterFactory.deploy(collateral.address, token.address);
   });
 
-  describe('debt / debtUSD / hypotheticalDebtUSD', () => {
+  describe('debtUSD / hypotheticalDebtUSD', () => {
     const debt = 5000 * 1e6; // 5000 USDT
     const price = '1000000000000000000000000000000'; // 1e30
 
@@ -71,10 +71,6 @@ describe("IBAgreement", () => {
         cyToken.setBorrowBalance(ibAgreement.address, debt),
         priceOracle.setUnderlyingPrice(cyToken.address, price)
       ]);
-    });
-
-    it('shows the debt', async () => {
-      expect(await ibAgreement.debt()).to.eq(debt);
     });
 
     it('shows the debt in USD value', async () => {
@@ -155,18 +151,22 @@ describe("IBAgreement", () => {
       await ibAgreement.connect(borrower).borrow(borrowAmount);
       expect(await ibAgreement.debtUSD()).to.eq(toWei('100'));
 
-      await underlying.connect(borrower).transfer(ibAgreement.address, borrowAmount);
-      await ibAgreement.repay();
+      await underlying.connect(borrower).approve(ibAgreement.address, borrowAmount);
+      await ibAgreement.connect(borrower).repay(borrowAmount);
       expect(await ibAgreement.debtUSD()).to.eq(0);
+    });
+
+    it('failed to repay for non-borrower', async () => {
+      await expect(ibAgreement.repay(borrowAmount)).to.be.revertedWith('caller is not the borrower');
     });
 
     it('failed to repay for unknown reason', async () => {
       await ibAgreement.connect(borrower).borrow(borrowAmount);
       expect(await ibAgreement.debtUSD()).to.eq(toWei('100'));
 
-      await underlying.connect(borrower).transfer(ibAgreement.address, borrowAmount);
+      await underlying.connect(borrower).approve(ibAgreement.address, borrowAmount);
       await cyToken.setRepayFailed(true);
-      await expect(ibAgreement.repay()).to.be.revertedWith('repay failed');
+      await expect(ibAgreement.connect(borrower).repay(borrowAmount)).to.be.revertedWith('repay failed');
       expect(await ibAgreement.debtUSD()).to.eq(toWei('100'));
     });
 
@@ -206,11 +206,6 @@ describe("IBAgreement", () => {
     it('failed to seize for non-executor', async () => {
       await expect(ibAgreement.seize(token.address, amount)).to.be.revertedWith('caller is not the executor');
       expect(await token.balanceOf(executorAddress)).to.eq(0);
-    });
-
-    it('failed to seize collateral', async () => {
-      await expect(ibAgreement.connect(executor).seize(collateral.address, amount)).to.be.revertedWith('cannot seize collateral');
-      expect(await collateral.balanceOf(executorAddress)).to.eq(0);
     });
   });
 
