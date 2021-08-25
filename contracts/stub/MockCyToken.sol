@@ -6,8 +6,8 @@ import "../interfaces/ICToken.sol";
 import "./MockToken.sol";
 
 contract MockCyToken is ICToken {
-    mapping(address => uint) private _balances;
-    mapping(address => uint) private _borrowBalances;
+    mapping(address => uint256) private _balances;
+    mapping(address => uint256) private _borrowBalances;
     MockToken private _underlying;
     address private _comptroller;
     bool private _borrowFailed;
@@ -19,17 +19,23 @@ contract MockCyToken is ICToken {
         _underlying.mint(address(this), 1000000 * 10**_underlying.decimals());
     }
 
-    function borrow(uint borrowAmount) external override returns (uint) {
+    function borrow(uint256 borrowAmount) external override returns (uint256) {
         if (_borrowFailed) {
             // Return non-zero value.
             return 1;
         }
         _underlying.transfer(msg.sender, borrowAmount);
-        _borrowBalances[msg.sender] = _borrowBalances[msg.sender] + borrowAmount;
+        _borrowBalances[msg.sender] =
+            _borrowBalances[msg.sender] +
+            borrowAmount;
         return 0;
     }
 
-    function repayBorrow(uint repayAmount) external override returns (uint) {
+    function repayBorrow(uint256 repayAmount)
+        external
+        override
+        returns (uint256)
+    {
         if (_repayFailed) {
             // Return non-zero value.
             return 1;
@@ -39,15 +45,25 @@ contract MockCyToken is ICToken {
         return 0;
     }
 
-    function underlying() external override view returns (address) {
+    function underlying() external view override returns (address) {
         return address(_underlying);
     }
 
-    function getAccountSnapshot(address account) external override view returns (uint, uint, uint, uint) {
+    function getAccountSnapshot(address account)
+        external
+        view
+        override
+        returns (
+            uint256,
+            uint256,
+            uint256,
+            uint256
+        )
+    {
         return (0, 0, _borrowBalances[account], 0);
     }
 
-    function comptroller() external override view returns (address) {
+    function comptroller() external view override returns (address) {
         return _comptroller;
     }
 
@@ -59,8 +75,7 @@ contract MockCyToken is ICToken {
         _repayFailed = failed;
     }
 
-    function setBorrowBalance(address account, uint balance) external {
+    function setBorrowBalance(address account, uint256 balance) external {
         _borrowBalances[account] = balance;
     }
-
 }

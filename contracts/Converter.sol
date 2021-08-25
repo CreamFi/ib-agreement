@@ -11,12 +11,17 @@ import "./interfaces/IUniswapV2Pair.sol";
 contract Converter is Ownable, IConverter {
     using SafeERC20 for IERC20;
 
-    address public override immutable source;
-    address public override immutable destination;
+    address public immutable override source;
+    address public immutable override destination;
     IUniswapV2Factory public immutable factory;
     mapping(address => address) public bridges;
 
-    event Convert(address indexed fromToken, address indexed toToken, uint fromAmount, uint toAmount);
+    event Convert(
+        address indexed fromToken,
+        address indexed toToken,
+        uint256 fromAmount,
+        uint256 toAmount
+    );
     event BridgeSet(address indexed token, address indexed bridge);
 
     constructor(
@@ -33,7 +38,7 @@ contract Converter is Ownable, IConverter {
      * @notice Convert the source token to the destination token.
      * @param amount The amount of source token
      */
-    function convert(uint amount) external override {
+    function convert(uint256 amount) external override {
         convertInternal(source, amount, msg.sender);
     }
 
@@ -46,7 +51,11 @@ contract Converter is Ownable, IConverter {
      * @param receiver The receiver after the swap
      * @return amountOut The amount after the conversion
      */
-    function convertInternal(address token, uint amountIn, address receiver) internal returns (uint amountOut) {
+    function convertInternal(
+        address token,
+        uint256 amountIn,
+        address receiver
+    ) internal returns (uint256 amountOut) {
         if (token == destination) {
             // If it's the destination token, send it to the receiver directly.
             IERC20(token).safeTransfer(receiver, amountIn);
@@ -54,7 +63,11 @@ contract Converter is Ownable, IConverter {
         } else {
             // If it's other token, try to swap the token to other token.
             address bridgeToken = bridges[token];
-            amountOut = convertInternal(bridgeToken, swap(token, bridgeToken, amountIn, address(this)), receiver);
+            amountOut = convertInternal(
+                bridgeToken,
+                swap(token, bridgeToken, amountIn, address(this)),
+                receiver
+            );
         }
     }
 
@@ -66,11 +79,18 @@ contract Converter is Ownable, IConverter {
      * @param receiver The receiver after the swap
      * @return amountOut The amount of toToken that will be sent to the receiver
      */
-    function swap(address fromToken, address toToken, uint amountIn, address receiver) internal returns (uint amountOut) {
-        IUniswapV2Pair pair = IUniswapV2Pair(factory.getPair(fromToken, toToken));
+    function swap(
+        address fromToken,
+        address toToken,
+        uint256 amountIn,
+        address receiver
+    ) internal returns (uint256 amountOut) {
+        IUniswapV2Pair pair = IUniswapV2Pair(
+            factory.getPair(fromToken, toToken)
+        );
         require(address(pair) != address(0), "invalid pair");
 
-        (uint reserve0, uint reserve1, ) = pair.getReserves();
+        (uint256 reserve0, uint256 reserve1, ) = pair.getReserves();
 
         if (fromToken == pair.token0()) {
             amountOut = getAmountOut(amountIn, reserve0, reserve1);
@@ -91,10 +111,14 @@ contract Converter is Ownable, IConverter {
      * @param reserveOut Reserve of output token in the pair
      * @return amountOut Calculated swap output token amount
      */
-    function getAmountOut(uint amountIn, uint reserveIn, uint reserveOut) internal pure returns (uint amountOut) {
-        uint amountInWithFee = amountIn * 997;
-        uint numerator = amountInWithFee * reserveOut;
-        uint denominator = reserveIn * 1000 + amountInWithFee;
+    function getAmountOut(
+        uint256 amountIn,
+        uint256 reserveIn,
+        uint256 reserveOut
+    ) internal pure returns (uint256 amountOut) {
+        uint256 amountInWithFee = amountIn * 997;
+        uint256 numerator = amountInWithFee * reserveOut;
+        uint256 denominator = reserveIn * 1000 + amountInWithFee;
         amountOut = numerator / denominator;
     }
 
@@ -115,7 +139,7 @@ contract Converter is Ownable, IConverter {
      * @param token The token address
      * @param amount The amount
      */
-    function seize(IERC20 token, uint amount) external onlyOwner {
+    function seize(IERC20 token, uint256 amount) external onlyOwner {
         token.safeTransfer(owner(), amount);
     }
 }
