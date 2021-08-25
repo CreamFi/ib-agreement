@@ -11,7 +11,7 @@ contract MockComptroller is IComptroller {
         _oracle = oracle_;
     }
 
-    function oracle() external override view returns (address) {
+    function oracle() external view override returns (address) {
         return _oracle;
     }
 }

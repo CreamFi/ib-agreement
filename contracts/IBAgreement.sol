@@ -19,8 +19,8 @@ contract IBAgreement {
     ICToken public immutable cy;
     IERC20 public immutable underlying;
     IERC20 public immutable collateral;
-    uint public immutable collateralFactor;
-    uint public immutable liquidationFactor;
+    uint256 public immutable collateralFactor;
+    uint256 public immutable liquidationFactor;
     IConverter public converter;
     IPriceFeed public priceFeed;
 
@@ -46,7 +46,16 @@ contract IBAgreement {
      *
      * All of these values are immutable: they can only be set once during construction.
      */
-    constructor(address _executor, address _borrower, address _governor, address _cy, address _collateral, address _priceFeed, uint _collateralFactor, uint _liquidationFactor) {
+    constructor(
+        address _executor,
+        address _borrower,
+        address _governor,
+        address _cy,
+        address _collateral,
+        address _priceFeed,
+        uint256 _collateralFactor,
+        uint256 _liquidationFactor
+    ) {
         executor = _executor;
         borrower = _borrower;
         governor = _governor;
@@ -58,16 +67,23 @@ contract IBAgreement {
         liquidationFactor = _liquidationFactor;
 
         require(_collateral == priceFeed.getToken(), "mismatch price feed");
-        require(_collateralFactor > 0 && _collateralFactor <= 1e18, "invalid collateral factor");
-        require(_liquidationFactor >= _collateralFactor && _liquidationFactor <= 1e18, "invalid liquidation factor");
+        require(
+            _collateralFactor > 0 && _collateralFactor <= 1e18,
+            "invalid collateral factor"
+        );
+        require(
+            _liquidationFactor >= _collateralFactor &&
+                _liquidationFactor <= 1e18,
+            "invalid liquidation factor"
+        );
     }
 
     /**
      * @notice Get the current debt of this contract
      * @return The borrow balance
      */
-    function debt() external view returns (uint) {
-        (,,uint borrowBalance,) = cy.getAccountSnapshot(address(this));
+    function debt() external view returns (uint256) {
+        (, , uint256 borrowBalance, ) = cy.getAccountSnapshot(address(this));
         return borrowBalance;
     }
 
@@ -75,9 +91,11 @@ contract IBAgreement {
      * @notice Get the current debt in USD value of this contract
      * @return The borrow balance in USD value
      */
-    function debtUSD() external view returns (uint) {
-        IPriceOracle oracle = IPriceOracle(IComptroller(cy.comptroller()).oracle());
-        return this.debt() * oracle.getUnderlyingPrice(address(cy)) / 1e18;
+    function debtUSD() external view returns (uint256) {
+        IPriceOracle oracle = IPriceOracle(
+            IComptroller(cy.comptroller()).oracle()
+        );
+        return (this.debt() * oracle.getUnderlyingPrice(address(cy))) / 1e18;
     }
 
     /**
@@ -85,18 +103,29 @@ contract IBAgreement {
      * @param borrowAmount The hypothetical borrow amount
      * @return The hypothetical debt in USD value
      */
-    function hypotheticalDebtUSD(uint borrowAmount) external view returns (uint) {
-        IPriceOracle oracle = IPriceOracle(IComptroller(cy.comptroller()).oracle());
-        return (this.debt() + borrowAmount) * oracle.getUnderlyingPrice(address(cy)) / 1e18;
+    function hypotheticalDebtUSD(uint256 borrowAmount)
+        external
+        view
+        returns (uint256)
+    {
+        IPriceOracle oracle = IPriceOracle(
+            IComptroller(cy.comptroller()).oracle()
+        );
+        return
+            ((this.debt() + borrowAmount) *
+                oracle.getUnderlyingPrice(address(cy))) / 1e18;
     }
 
     /**
      * @notice Get the current collateral in USD value in this contract
      * @return The collateral in USD value
      */
-    function collateralUSD() external view returns (uint) {
-        uint normalizedAmount = collateral.balanceOf(address(this)) * 10**(18 - IERC20Metadata(address(collateral)).decimals());
-        return normalizedAmount * priceFeed.getPrice() / 1e18 * collateralFactor / 1e18;
+    function collateralUSD() external view returns (uint256) {
+        uint256 normalizedAmount = collateral.balanceOf(address(this)) *
+            10**(18 - IERC20Metadata(address(collateral)).decimals());
+        return
+            (((normalizedAmount * priceFeed.getPrice()) / 1e18) *
+                collateralFactor) / 1e18;
     }
 
     /**
@@ -104,9 +133,17 @@ contract IBAgreement {
      * @param withdrawAmount The hypothetical withdraw amount
      * @return The hypothetical collateral in USD value
      */
-    function hypotheticalCollateralUSD(uint withdrawAmount) external view returns (uint) {
-        uint normalizedAmount = (collateral.balanceOf(address(this)) - withdrawAmount) * 10**(18 - IERC20Metadata(address(collateral)).decimals());
-        return normalizedAmount * priceFeed.getPrice() / 1e18 * collateralFactor / 1e18;
+    function hypotheticalCollateralUSD(uint256 withdrawAmount)
+        external
+        view
+        returns (uint256)
+    {
+        uint256 normalizedAmount = (collateral.balanceOf(address(this)) -
+            withdrawAmount) *
+            10**(18 - IERC20Metadata(address(collateral)).decimals());
+        return
+            (((normalizedAmount * priceFeed.getPrice()) / 1e18) *
+                collateralFactor) / 1e18;
     }
 
     /**
@@ -114,17 +151,23 @@ contract IBAgreement {
      * @dev If the debt is greater than the liquidation threshold, this agreement is liquidatable.
      * @return The lquidation threshold
      */
-    function liquidationThreshold() external view returns (uint) {
-        uint normalizedAmount = collateral.balanceOf(address(this)) * 10**(18 - IERC20Metadata(address(collateral)).decimals());
-        return normalizedAmount * priceFeed.getPrice() / 1e18 * liquidationFactor / 1e18;
+    function liquidationThreshold() external view returns (uint256) {
+        uint256 normalizedAmount = collateral.balanceOf(address(this)) *
+            10**(18 - IERC20Metadata(address(collateral)).decimals());
+        return
+            (((normalizedAmount * priceFeed.getPrice()) / 1e18) *
+                liquidationFactor) / 1e18;
     }
 
     /**
      * @notice Borrow from cyToken if the collateral if sufficient
      * @param _amount The borrow amount
      */
-    function borrow(uint _amount) external onlyBorrower {
-        require(this.hypotheticalDebtUSD(_amount) <= this.collateralUSD(), "undercollateralized");
+    function borrow(uint256 _amount) external onlyBorrower {
+        require(
+            this.hypotheticalDebtUSD(_amount) <= this.collateralUSD(),
+            "undercollateralized"
+        );
         require(cy.borrow(_amount) == 0, "borrow failed");
         underlying.safeTransfer(borrower, _amount);
     }
@@ -133,8 +176,11 @@ contract IBAgreement {
      * @notice Withdraw the collateral if sufficient
      * @param _amount The withdraw amount
      */
-    function withdraw(uint _amount) external onlyBorrower {
-        require(this.debtUSD() <= this.hypotheticalCollateralUSD(_amount), "undercollateralized");
+    function withdraw(uint256 _amount) external onlyBorrower {
+        require(
+            this.debtUSD() <= this.hypotheticalCollateralUSD(_amount),
+            "undercollateralized"
+        );
         collateral.safeTransfer(borrower, _amount);
     }
 
@@ -142,7 +188,7 @@ contract IBAgreement {
      * @notice Repay the debts
      */
     function repay() external {
-        uint _balance = underlying.balanceOf(address(this));
+        uint256 _balance = underlying.balanceOf(address(this));
         underlying.safeApprove(address(cy), _balance);
         require(cy.repayBorrow(_balance) == 0, "repay failed");
     }
@@ -152,7 +198,7 @@ contract IBAgreement {
      * @param token The token
      * @param amount The amount
      */
-    function seize(IERC20 token, uint amount) external onlyExecutor {
+    function seize(IERC20 token, uint256 amount) external onlyExecutor {
         require(token != collateral, "cannot seize collateral");
         token.safeTransfer(executor, amount);
     }
@@ -161,11 +207,20 @@ contract IBAgreement {
      * @notice Liquidate the collateral if it's under collateral
      * @param amount The liquidate amount
      */
-    function liquidate(uint amount) external onlyExecutor {
-        require(this.debtUSD() > this.liquidationThreshold(), "not liquidatable");
+    function liquidate(uint256 amount) external onlyExecutor {
+        require(
+            this.debtUSD() > this.liquidationThreshold(),
+            "not liquidatable"
+        );
         require(address(converter) != address(0), "empty converter");
-        require(converter.source() == address(collateral), "mismatch source token");
-        require(converter.destination() == address(underlying), "mismatch destination token");
+        require(
+            converter.source() == address(collateral),
+            "mismatch source token"
+        );
+        require(
+            converter.destination() == address(underlying),
+            "mismatch destination token"
+        );
 
         // Convert the collateral to the underlying for repayment.
         collateral.safeTransfer(address(converter), amount);
@@ -182,8 +237,14 @@ contract IBAgreement {
     function setConverter(address _converter) external onlyGovernor {
         require(_converter != address(0), "empty converter");
         converter = IConverter(_converter);
-        require(converter.source() == address(collateral), "mismatch source token");
-        require(converter.destination() == address(underlying), "mismatch destination token");
+        require(
+            converter.source() == address(collateral),
+            "mismatch source token"
+        );
+        require(
+            converter.destination() == address(underlying),
+            "mismatch destination token"
+        );
     }
 
     /**
@@ -191,7 +252,10 @@ contract IBAgreement {
      * @param _priceFeed The new price feed
      */
     function setPriceFeed(address _priceFeed) external onlyGovernor {
-        require(address(collateral) == IPriceFeed(_priceFeed).getToken(), "mismatch price feed");
+        require(
+            address(collateral) == IPriceFeed(_priceFeed).getToken(),
+            "mismatch price feed"
+        );
 
         priceFeed = IPriceFeed(_priceFeed);
     }
