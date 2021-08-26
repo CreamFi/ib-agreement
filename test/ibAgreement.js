@@ -109,7 +109,7 @@ describe("IBAgreement", () => {
     });
   });
 
-  describe('borrow / withdraw / repay', () => {
+  describe('borrow / borrowMax / withdraw / repay', () => {
     const collateralAmount = 1 * 1e8; // 1 wBTC
     const collateralPrice = '4000000000000'; // 40000 * 1e8
     const borrowAmount = 100 * 1e6; // 100 USDT
@@ -145,6 +145,36 @@ describe("IBAgreement", () => {
       await cyToken.setBorrowFailed(true);
       await expect(ibAgreement.connect(borrower).borrow(borrowAmount)).to.be.revertedWith('borrow failed');
       expect(await ibAgreement.debtUSD()).to.eq(0);
+    });
+
+    it('borrows max successfully', async () => {
+      await ibAgreement.connect(borrower).borrowMax();
+      expect(await ibAgreement.debtUSD()).to.eq(toWei('20000'));
+    });
+
+    it('borrows max successfully (rounding test)', async () => {
+      const newCollateralPrice = '3999999999999'; // 39999.9 * 1e8
+      await registry.setPrice(collateral.address, usdAddress, newCollateralPrice);
+
+      await ibAgreement.connect(borrower).borrowMax();
+      expect(await ibAgreement.debtUSD()).to.gt(toWei('19999'));
+      expect(await ibAgreement.debtUSD()).to.lt(await ibAgreement.collateralUSD());
+    });
+
+    it('failed to borrow max for non-borrower', async () => {
+      await expect(ibAgreement.borrowMax()).to.be.revertedWith('caller is not the borrower');
+      expect(await ibAgreement.debtUSD()).to.eq(0);
+    });
+
+    it('failed to borrow max for undercollateralized', async () => {
+      await ibAgreement.connect(borrower).borrowMax();
+      expect(await ibAgreement.debtUSD()).to.eq(toWei('20000'));
+
+      const newCollateralPrice = '3999999999999'; // 39999.9 * 1e8
+      await registry.setPrice(collateral.address, usdAddress, newCollateralPrice);
+
+      await expect(ibAgreement.connect(borrower).borrowMax()).to.be.revertedWith('undercollateralized');
+      expect(await ibAgreement.debtUSD()).to.eq(toWei('20000'));
     });
 
     it('repays successfully', async () => {

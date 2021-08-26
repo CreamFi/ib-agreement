@@ -133,16 +133,27 @@ contract IBAgreement {
     }
 
     /**
-     * @notice Borrow from cyToken if the collateral if sufficient
+     * @notice Borrow from cyToken if the collateral is sufficient
      * @param _amount The borrow amount
      */
     function borrow(uint256 _amount) external onlyBorrower {
-        require(
-            this.hypotheticalDebtUSD(_amount) <= this.collateralUSD(),
-            "undercollateralized"
+        borrowInternal(_amount);
+    }
+
+    /**
+     * @notice Borrow max from cyToken with current price
+     */
+    function borrowMax() external onlyBorrower {
+        (, , uint256 borrowBalance, ) = cy.getAccountSnapshot(address(this));
+
+        IPriceOracle oracle = IPriceOracle(
+            IComptroller(cy.comptroller()).oracle()
         );
-        require(cy.borrow(_amount) == 0, "borrow failed");
-        underlying.safeTransfer(borrower, _amount);
+
+        uint256 maxBorrowAmount = (this.collateralUSD() * 1e18) /
+            oracle.getUnderlyingPrice(address(cy));
+        require(maxBorrowAmount > borrowBalance, "undercollateralized");
+        borrowInternal(maxBorrowAmount - borrowBalance);
     }
 
     /**
@@ -266,6 +277,19 @@ contract IBAgreement {
         uint8 decimals = IERC20Metadata(address(collateral)).decimals();
         uint256 normalizedAmount = amount * 10**(18 - decimals);
         return (normalizedAmount * priceFeed.getPrice()) / 1e18;
+    }
+
+    /**
+     * @notice Borrow from cyToken
+     * @param _amount The borrow amount
+     */
+    function borrowInternal(uint256 _amount) internal {
+        require(
+            getHypotheticalDebtValue(_amount) <= this.collateralUSD(),
+            "undercollateralized"
+        );
+        require(cy.borrow(_amount) == 0, "borrow failed");
+        underlying.safeTransfer(borrower, _amount);
     }
 
     /**
