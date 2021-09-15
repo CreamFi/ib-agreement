@@ -79,23 +79,11 @@ contract IBAgreement {
     }
 
     /**
-     * @notice Get the current debt of this contract
-     * @return The borrow balance
-     */
-    function debt() external view returns (uint256) {
-        (, , uint256 borrowBalance, ) = cy.getAccountSnapshot(address(this));
-        return borrowBalance;
-    }
-
-    /**
      * @notice Get the current debt in USD value of this contract
      * @return The borrow balance in USD value
      */
     function debtUSD() external view returns (uint256) {
-        IPriceOracle oracle = IPriceOracle(
-            IComptroller(cy.comptroller()).oracle()
-        );
-        return (this.debt() * oracle.getUnderlyingPrice(address(cy))) / 1e18;
+        return getHypotheticalDebtValue(0);
     }
 
     /**
@@ -108,42 +96,30 @@ contract IBAgreement {
         view
         returns (uint256)
     {
-        IPriceOracle oracle = IPriceOracle(
-            IComptroller(cy.comptroller()).oracle()
-        );
-        return
-            ((this.debt() + borrowAmount) *
-                oracle.getUnderlyingPrice(address(cy))) / 1e18;
+        return getHypotheticalDebtValue(borrowAmount);
     }
 
     /**
-     * @notice Get the current collateral in USD value in this contract
-     * @return The collateral in USD value
+     * @notice Get the max value in USD to use for borrow in this contract
+     * @return The USD value
      */
     function collateralUSD() external view returns (uint256) {
-        uint256 normalizedAmount = collateral.balanceOf(address(this)) *
-            10**(18 - IERC20Metadata(address(collateral)).decimals());
-        return
-            (((normalizedAmount * priceFeed.getPrice()) / 1e18) *
-                collateralFactor) / 1e18;
+        uint256 value = getHypotheticalCollateralValue(0);
+        return (value * collateralFactor) / 1e18;
     }
 
     /**
-     * @notice Get the hypothetical collateral in USD value in this contract after withdraw
+     * @notice Get the hypothetical max value in USD to use for borrow in this contract after withdraw
      * @param withdrawAmount The hypothetical withdraw amount
-     * @return The hypothetical collateral in USD value
+     * @return The hypothetical USD value
      */
     function hypotheticalCollateralUSD(uint256 withdrawAmount)
         external
         view
         returns (uint256)
     {
-        uint256 normalizedAmount = (collateral.balanceOf(address(this)) -
-            withdrawAmount) *
-            10**(18 - IERC20Metadata(address(collateral)).decimals());
-        return
-            (((normalizedAmount * priceFeed.getPrice()) / 1e18) *
-                collateralFactor) / 1e18;
+        uint256 value = getHypotheticalCollateralValue(withdrawAmount);
+        return (value * collateralFactor) / 1e18;
     }
 
     /**
@@ -152,24 +128,32 @@ contract IBAgreement {
      * @return The lquidation threshold
      */
     function liquidationThreshold() external view returns (uint256) {
-        uint256 normalizedAmount = collateral.balanceOf(address(this)) *
-            10**(18 - IERC20Metadata(address(collateral)).decimals());
-        return
-            (((normalizedAmount * priceFeed.getPrice()) / 1e18) *
-                liquidationFactor) / 1e18;
+        uint256 value = getHypotheticalCollateralValue(0);
+        return (value * liquidationFactor) / 1e18;
     }
 
     /**
-     * @notice Borrow from cyToken if the collateral if sufficient
+     * @notice Borrow from cyToken if the collateral is sufficient
      * @param _amount The borrow amount
      */
     function borrow(uint256 _amount) external onlyBorrower {
-        require(
-            this.hypotheticalDebtUSD(_amount) <= this.collateralUSD(),
-            "undercollateralized"
+        borrowInternal(_amount);
+    }
+
+    /**
+     * @notice Borrow max from cyToken with current price
+     */
+    function borrowMax() external onlyBorrower {
+        (, , uint256 borrowBalance, ) = cy.getAccountSnapshot(address(this));
+
+        IPriceOracle oracle = IPriceOracle(
+            IComptroller(cy.comptroller()).oracle()
         );
-        require(cy.borrow(_amount) == 0, "borrow failed");
-        underlying.safeTransfer(borrower, _amount);
+
+        uint256 maxBorrowAmount = (this.collateralUSD() * 1e18) /
+            oracle.getUnderlyingPrice(address(cy));
+        require(maxBorrowAmount > borrowBalance, "undercollateralized");
+        borrowInternal(maxBorrowAmount - borrowBalance);
     }
 
     /**
@@ -186,11 +170,11 @@ contract IBAgreement {
 
     /**
      * @notice Repay the debts
+     * @param _amount The repay amount
      */
-    function repay() external {
-        uint256 _balance = underlying.balanceOf(address(this));
-        underlying.safeApprove(address(cy), _balance);
-        require(cy.repayBorrow(_balance) == 0, "repay failed");
+    function repay(uint256 _amount) external onlyBorrower {
+        underlying.safeTransferFrom(msg.sender, address(this), _amount);
+        repayInternal(_amount);
     }
 
     /**
@@ -199,7 +183,6 @@ contract IBAgreement {
      * @param amount The amount
      */
     function seize(IERC20 token, uint256 amount) external onlyExecutor {
-        require(token != collateral, "cannot seize collateral");
         token.safeTransfer(executor, amount);
     }
 
@@ -227,7 +210,7 @@ contract IBAgreement {
         converter.convert(amount);
 
         // Repay the debts
-        this.repay();
+        repayInternal(underlying.balanceOf(address(this)));
     }
 
     /**
@@ -258,5 +241,63 @@ contract IBAgreement {
         );
 
         priceFeed = IPriceFeed(_priceFeed);
+    }
+
+    /* Internal functions */
+
+    /**
+     * @notice Get the current debt of this contract
+     * @param borrowAmount The hypothetical borrow amount
+     * @return The borrow balance
+     */
+    function getHypotheticalDebtValue(uint256 borrowAmount)
+        internal
+        view
+        returns (uint256)
+    {
+        (, , uint256 borrowBalance, ) = cy.getAccountSnapshot(address(this));
+        uint256 amount = borrowBalance + borrowAmount;
+        IPriceOracle oracle = IPriceOracle(
+            IComptroller(cy.comptroller()).oracle()
+        );
+        return (amount * oracle.getUnderlyingPrice(address(cy))) / 1e18;
+    }
+
+    /**
+     * @notice Get the hypothetical collateral in USD value in this contract after withdraw
+     * @param withdrawAmount The hypothetical withdraw amount
+     * @return The hypothetical collateral in USD value
+     */
+    function getHypotheticalCollateralValue(uint256 withdrawAmount)
+        internal
+        view
+        returns (uint256)
+    {
+        uint256 amount = collateral.balanceOf(address(this)) - withdrawAmount;
+        uint8 decimals = IERC20Metadata(address(collateral)).decimals();
+        uint256 normalizedAmount = amount * 10**(18 - decimals);
+        return (normalizedAmount * priceFeed.getPrice()) / 1e18;
+    }
+
+    /**
+     * @notice Borrow from cyToken
+     * @param _amount The borrow amount
+     */
+    function borrowInternal(uint256 _amount) internal {
+        require(
+            getHypotheticalDebtValue(_amount) <= this.collateralUSD(),
+            "undercollateralized"
+        );
+        require(cy.borrow(_amount) == 0, "borrow failed");
+        underlying.safeTransfer(borrower, _amount);
+    }
+
+    /**
+     * @notice Repay the debts
+     * @param _amount The repay amount
+     */
+    function repayInternal(uint256 _amount) internal {
+        underlying.safeIncreaseAllowance(address(cy), _amount);
+        require(cy.repayBorrow(_amount) == 0, "repay failed");
     }
 }
