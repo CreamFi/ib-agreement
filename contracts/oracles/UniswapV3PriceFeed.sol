@@ -14,7 +14,7 @@ contract UniswapV3PriceFeed is IPriceFeed {
 
     address public constant weth = 0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2;
     uint256 public constant amountIn = 1e18;
-    uint32 public constant twapPeriod = 1 days;
+    uint32 public constant twapPeriod = 1 hours;
 
     /**
      * @dev Sets the values for {registry}, {multiPriceOracle}, and {token}.
