@@ -14,4 +14,8 @@ contract MockComptroller is IComptroller {
     function oracle() external view override returns (address) {
         return _oracle;
     }
+
+    function getAssetsIn(address account) external view override returns (address[] memory assets) {
+        return assets;
+    }
 }
