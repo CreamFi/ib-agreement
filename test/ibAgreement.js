@@ -17,6 +17,7 @@ describe("IBAgreement", () => {
   let ibAgreement;
   let underlying;
   let cyToken;
+  let cyToken2;
   let priceOracle;
   let comptroller;
   let collateral;
@@ -38,7 +39,7 @@ describe("IBAgreement", () => {
     user = accounts[4];
     userAddress = await user.getAddress();
 
-    const ibAgreementFactory = await ethers.getContractFactory("IBAgreement");
+    const ibAgreementFactory = await ethers.getContractFactory("IBAgreementV2");
     const tokenFactory = await ethers.getContractFactory("MockToken");
     const cyTokenFactory = await ethers.getContractFactory("MockCyToken");
     const priceOracleFactory = await ethers.getContractFactory("MockPriceOralce");
@@ -51,10 +52,14 @@ describe("IBAgreement", () => {
     comptroller = await comptrollerFactory.deploy(priceOracle.address);
     underlying = await tokenFactory.deploy("USD Tether", "USDT", 6);
     cyToken = await cyTokenFactory.deploy(comptroller.address, underlying.address);
+    cyToken2 = await cyTokenFactory.deploy(comptroller.address, underlying.address);
     collateral = await tokenFactory.deploy("Wrapped BTC", "WBTC", 8);
     registry = await registryFactory.deploy();
     priceFeed = await priceFeedFactory.deploy(registry.address, collateral.address, collateral.address, usdAddress);
-    ibAgreement = await ibAgreementFactory.deploy(executorAddress, borrowerAddress, governorAddress, cyToken.address, collateral.address, priceFeed.address, collateralFactor, liquidationFactor);
+    ibAgreement = await ibAgreementFactory.deploy(executorAddress, borrowerAddress, governorAddress, comptroller.address, collateral.address, priceFeed.address, collateralFactor, liquidationFactor);
+    await comptroller.setMarketListed(cyToken.address, true);
+    await comptroller.pushAssetsIn(ibAgreement.address, cyToken.address);
+    await ibAgreement.connect(executor).setAllowedMarkets([cyToken.address], [true]);
 
     token = await tokenFactory.deploy("Cream", "CREAM", 18);
     converter = await converterFactory.deploy(collateral.address, underlying.address);
@@ -79,7 +84,7 @@ describe("IBAgreement", () => {
 
     it('shows the hypothetical debt in USD value', async () => {
       const borrowAmount = 1000 * 1e6; // 1000 USDT
-      expect(await ibAgreement.hypotheticalDebtUSD(borrowAmount)).to.eq(toWei('6000'));
+      expect(await ibAgreement.hypotheticalDebtUSD(cyToken.address, borrowAmount)).to.eq(toWei('6000'));
     });
   });
 
@@ -126,29 +131,35 @@ describe("IBAgreement", () => {
     });
 
     it('borrows successfully', async () => {
-      await ibAgreement.connect(borrower).borrow(borrowAmount);
+      await ibAgreement.connect(borrower).borrow(cyToken.address, borrowAmount);
       expect(await ibAgreement.debtUSD()).to.eq(toWei('100'));
     });
 
     it('failed to borrow for non-borrower', async () => {
-      await expect(ibAgreement.borrow(borrowAmount)).to.be.revertedWith('caller is not the borrower');
+      await expect(ibAgreement.borrow(cyToken.address, borrowAmount)).to.be.revertedWith('caller is not the borrower');
       expect(await ibAgreement.debtUSD()).to.eq(0);
     });
 
     it('failed to borrow for undercollateralized', async () => {
       const amount = 20001 * 1e6; // collateral is 20000
-      await expect(ibAgreement.connect(borrower).borrow(amount)).to.be.revertedWith('undercollateralized');
+      await expect(ibAgreement.connect(borrower).borrow(cyToken.address, amount)).to.be.revertedWith('undercollateralized');
       expect(await ibAgreement.debtUSD()).to.eq(0);
     });
 
     it('failed to borrow for unknown reason', async () => {
       await cyToken.setBorrowFailed(true);
-      await expect(ibAgreement.connect(borrower).borrow(borrowAmount)).to.be.revertedWith('borrow failed');
+      await expect(ibAgreement.connect(borrower).borrow(cyToken.address, borrowAmount)).to.be.revertedWith('borrow failed');
+      expect(await ibAgreement.debtUSD()).to.eq(0);
+    });
+
+    it('failed to borrow for market not allowed', async () => {
+      await ibAgreement.connect(executor).setAllowedMarkets([cyToken.address], [false]);
+      await expect(ibAgreement.connect(borrower).borrow(cyToken.address, borrowAmount)).to.be.revertedWith('market not allowed');
       expect(await ibAgreement.debtUSD()).to.eq(0);
     });
 
     it('borrows max successfully', async () => {
-      await ibAgreement.connect(borrower).borrowMax();
+      await ibAgreement.connect(borrower).borrowMax(cyToken.address);
       expect(await ibAgreement.debtUSD()).to.eq(toWei('20000'));
     });
 
@@ -156,48 +167,60 @@ describe("IBAgreement", () => {
       const newCollateralPrice = '3999999999999'; // 39999.9 * 1e8
       await registry.setPrice(collateral.address, usdAddress, newCollateralPrice);
 
-      await ibAgreement.connect(borrower).borrowMax();
+      await ibAgreement.connect(borrower).borrowMax(cyToken.address);
       expect(await ibAgreement.debtUSD()).to.gt(toWei('19999'));
       expect(await ibAgreement.debtUSD()).to.lt(await ibAgreement.collateralUSD());
     });
 
     it('failed to borrow max for non-borrower', async () => {
-      await expect(ibAgreement.borrowMax()).to.be.revertedWith('caller is not the borrower');
+      await expect(ibAgreement.borrowMax(cyToken.address)).to.be.revertedWith('caller is not the borrower');
       expect(await ibAgreement.debtUSD()).to.eq(0);
     });
 
     it('failed to borrow max for undercollateralized', async () => {
-      await ibAgreement.connect(borrower).borrowMax();
+      await ibAgreement.connect(borrower).borrowMax(cyToken.address);
       expect(await ibAgreement.debtUSD()).to.eq(toWei('20000'));
 
       const newCollateralPrice = '3999999999999'; // 39999.9 * 1e8
       await registry.setPrice(collateral.address, usdAddress, newCollateralPrice);
 
-      await expect(ibAgreement.connect(borrower).borrowMax()).to.be.revertedWith('undercollateralized');
+      await expect(ibAgreement.connect(borrower).borrowMax(cyToken.address)).to.be.revertedWith('undercollateralized');
       expect(await ibAgreement.debtUSD()).to.eq(toWei('20000'));
     });
 
+    it('failed to borrow max for market not allowed', async () => {
+      await ibAgreement.connect(executor).setAllowedMarkets([cyToken.address], [false]);
+      await expect(ibAgreement.connect(borrower).borrowMax(cyToken.address)).to.be.revertedWith('market not allowed');
+      expect(await ibAgreement.debtUSD()).to.eq(0);
+    });
+
     it('repays successfully', async () => {
-      await ibAgreement.connect(borrower).borrow(borrowAmount);
+      await ibAgreement.connect(borrower).borrow(cyToken.address, borrowAmount);
       expect(await ibAgreement.debtUSD()).to.eq(toWei('100'));
 
       await underlying.connect(borrower).approve(ibAgreement.address, borrowAmount);
-      await ibAgreement.connect(borrower).repay(borrowAmount);
+      await ibAgreement.connect(borrower).repay(cyToken.address, borrowAmount);
       expect(await ibAgreement.debtUSD()).to.eq(0);
     });
 
     it('failed to repay for non-borrower', async () => {
-      await expect(ibAgreement.repay(borrowAmount)).to.be.revertedWith('caller is not the borrower');
+      await expect(ibAgreement.repay(cyToken.address, borrowAmount)).to.be.revertedWith('caller is not the borrower');
     });
 
     it('failed to repay for unknown reason', async () => {
-      await ibAgreement.connect(borrower).borrow(borrowAmount);
+      await ibAgreement.connect(borrower).borrow(cyToken.address, borrowAmount);
       expect(await ibAgreement.debtUSD()).to.eq(toWei('100'));
 
       await underlying.connect(borrower).approve(ibAgreement.address, borrowAmount);
       await cyToken.setRepayFailed(true);
-      await expect(ibAgreement.connect(borrower).repay(borrowAmount)).to.be.revertedWith('repay failed');
+      await expect(ibAgreement.connect(borrower).repay(cyToken.address, borrowAmount)).to.be.revertedWith('repay failed');
       expect(await ibAgreement.debtUSD()).to.eq(toWei('100'));
+    });
+
+    it('failed to repay for market not allowed', async () => {
+      await ibAgreement.connect(executor).setAllowedMarkets([cyToken.address], [false]);
+      await expect(ibAgreement.connect(borrower).repay(cyToken.address, borrowAmount)).to.be.revertedWith('market not allowed');
+      expect(await ibAgreement.debtUSD()).to.eq(0);
     });
 
     it('withdraws successfully', async () => {
@@ -239,7 +262,7 @@ describe("IBAgreement", () => {
     });
   });
 
-  describe('liquidate', async () => {
+  describe('seize collateral', async () => {
     const collateralAmount = 1 * 1e8; // 1 wBTC
     const collateralPrice = '4000000000000'; // 40000 * 1e8
     const borrowAmount = 20000 * 1e6; // 100 USDT
@@ -252,80 +275,40 @@ describe("IBAgreement", () => {
         ibAgreement.connect(governor).setPriceFeed(priceFeed.address),
         priceOracle.setUnderlyingPrice(cyToken.address, borrowPrice)
       ]);
-      await ibAgreement.connect(borrower).borrow(borrowAmount);
+      await ibAgreement.connect(borrower).borrow(cyToken.address, borrowAmount);
       expect(await ibAgreement.collateralUSD()).to.eq(toWei('20000')); // CF: 50%
       expect(await ibAgreement.liquidationThreshold()).to.eq(toWei('30000')); // LF: 75%
       expect(await ibAgreement.debtUSD()).to.eq(toWei('20000'));
     });
 
-    it('liquidates successfully', async () => {
+    it('seizes collateral successfully', async () => {
       const newCollateralPrice = '2666600000000'; // 26666 * 1e8
       const amount = 0.1 * 1e8; // 0.1 wBTC
       await registry.setPrice(collateral.address, usdAddress, newCollateralPrice);
       expect(await ibAgreement.collateralUSD()).to.eq(toWei('13333')); // $26666, CF: 50%, $13333
       expect(await ibAgreement.liquidationThreshold()).to.eq(toWei('19999.5')); // $26666, LF: 50%, $19999.5
-      expect(await ibAgreement.debtUSD()).to.eq(toWei('20000')); // $20000 > $19999.5, liquidatable
+      expect(await ibAgreement.debtUSD()).to.eq(toWei('20000')); // $20000 > $19999.5, collateral seizable
 
-      await ibAgreement.connect(governor).setConverter(converter.address);
-      await ibAgreement.connect(executor).liquidate(amount);
+      await ibAgreement.connect(executor).seize(collateral.address, amount);
       await registry.setPrice(collateral.address, usdAddress, collateralPrice);
       expect(await ibAgreement.collateralUSD()).to.eq(toWei('18000')); // 0.9 wBTC remain, $36000, CF: 50%, $18000
       expect(await ibAgreement.liquidationThreshold()).to.eq(toWei('27000')); // 0.9 wBTC remain, $36000, LF: 75%, $27000
-      expect(await ibAgreement.debtUSD()).to.eq(toWei('16000')); // liquidate 0.1 wBTC for $4000, debts: $20000 - $4000 = $16000
-    });
-
-    it('failed to liquidate for non-executor', async () => {
-      const amount = 0.1 * 1e8; // 0.1 wBTC
-      await expect(ibAgreement.liquidate(amount)).to.be.revertedWith('caller is not the executor');
-      expect(await ibAgreement.collateralUSD()).to.eq(toWei('20000'));
       expect(await ibAgreement.debtUSD()).to.eq(toWei('20000'));
     });
 
-    it('failed to liquidate for not liquidatable', async () => {
+    it('failed to seize collateral for not liquidatable', async () => {
       const amount = 0.1 * 1e8; // 0.1 wBTC
-      await expect(ibAgreement.connect(executor).liquidate(amount)).to.be.revertedWith('not liquidatable');
+      await expect(ibAgreement.connect(executor).seize(collateral.address, amount)).to.be.revertedWith('not liquidatable');
       expect(await ibAgreement.collateralUSD()).to.eq(toWei('20000'));
       expect(await ibAgreement.liquidationThreshold()).to.eq(toWei('30000')); // LF: 75%
       expect(await ibAgreement.debtUSD()).to.eq(toWei('20000'));
 
       const newCollateralPrice = '2666700000000'; // 26667 * 1e8
       await registry.setPrice(collateral.address, usdAddress, newCollateralPrice);
-      await expect(ibAgreement.connect(executor).liquidate(amount)).to.be.revertedWith('not liquidatable');
+      await expect(ibAgreement.connect(executor).seize(collateral.address, amount)).to.be.revertedWith('not liquidatable');
       expect(await ibAgreement.collateralUSD()).to.eq(toWei('13333.5')); // CF: 50%
       expect(await ibAgreement.liquidationThreshold()).to.eq(toWei('20000.25')); // LF: 75%
       expect(await ibAgreement.debtUSD()).to.eq(toWei('20000'));
-    });
-
-    it('failed to liquidate for repay failed', async () => {
-      await cyToken.setRepayFailed(true);
-
-      const newCollateralPrice = '2666600000000'; // 26666 * 1e8
-      const amount = 0.1 * 1e8; // 0.1 wBTC
-      await registry.setPrice(collateral.address, usdAddress, newCollateralPrice);
-      await ibAgreement.connect(governor).setConverter(converter.address);
-      await expect(ibAgreement.connect(executor).liquidate(amount)).to.be.revertedWith('repay failed');
-      await registry.setPrice(collateral.address, usdAddress, collateralPrice);
-      expect(await ibAgreement.collateralUSD()).to.eq(toWei('20000'));
-      expect(await ibAgreement.debtUSD()).to.eq(toWei('20000'));
-    });
-  });
-
-  describe('setConverter', async () => {
-    it('sets converter successfully', async () => {
-      await ibAgreement.connect(governor).setConverter(converter.address);
-      expect(await ibAgreement.converter()).to.eq(converter.address);
-    });
-
-    it('failed to set converter for non-governor', async () => {
-      await expect(ibAgreement.setConverter(converter.address)).to.be.revertedWith('caller is not the governor');
-    });
-
-    it('failed to set converter for mismatch source token', async () => {
-      await expect(ibAgreement.connect(governor).setConverter(invalidConverter1.address)).to.be.revertedWith('mismatch source token');
-    });
-
-    it('failed to set converter for mismatch destination token', async () => {
-      await expect(ibAgreement.connect(governor).setConverter(invalidConverter2.address)).to.be.revertedWith('mismatch destination token');
     });
   });
 
@@ -337,6 +320,29 @@ describe("IBAgreement", () => {
 
     it('failed to set price feed for non-governor', async () => {
       await expect(ibAgreement.setPriceFeed(priceFeed.address)).to.be.revertedWith('caller is not the governor');
+    });
+  });
+
+  describe('setAllowedMarkets', async () => {
+    it('sets allowed markets successfully', async () => {
+      await comptroller.setMarketListed(cyToken2.address, true);
+      await ibAgreement.connect(executor).setAllowedMarkets([cyToken2.address], [true]);
+      expect(await ibAgreement.allowedMarkets(cyToken2.address)).to.true;
+    });
+
+    it('failed to allow markets for length mismatch', async () => {
+      await expect(ibAgreement.connect(executor).setAllowedMarkets([cyToken2.address], [true, true])).to.be.revertedWith('length mismatch');
+      expect(await ibAgreement.allowedMarkets(cyToken2.address)).to.false;
+    });
+
+    it('failed to allow markets for non-executor', async () => {
+      await expect(ibAgreement.setAllowedMarkets([cyToken2.address], [true])).to.be.revertedWith('caller is not the executor');
+      expect(await ibAgreement.allowedMarkets(cyToken2.address)).to.false;
+    });
+
+    it('failed to allow markets for market not listed', async () => {
+      await expect(ibAgreement.connect(executor).setAllowedMarkets([cyToken2.address], [true])).to.be.revertedWith('market not listed');
+      expect(await ibAgreement.allowedMarkets(cyToken2.address)).to.false;
     });
   });
 });
