@@ -2,6 +2,7 @@
 
 pragma solidity ^0.8.0;
 
+import "@openzeppelin/contracts/security/ReentrancyGuard.sol";
 import "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
 import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import "./interfaces/IComptroller.sol";
@@ -10,7 +11,7 @@ import "./interfaces/ICToken.sol";
 import "./interfaces/IPriceFeed.sol";
 import "./interfaces/IPriceOracle.sol";
 
-contract IBAgreement {
+contract IBAgreementV2 is ReentrancyGuard {
     using SafeERC20 for IERC20;
 
     address public immutable executor;
@@ -21,7 +22,7 @@ contract IBAgreement {
     uint256 public immutable collateralFactor;
     uint256 public immutable liquidationFactor;
     IPriceFeed public priceFeed;
-    mapping(address => bool) allowedMarkets;
+    mapping(address => bool) public allowedMarkets;
 
     modifier onlyBorrower() {
         require(msg.sender == borrower, "caller is not the borrower");
@@ -35,6 +36,11 @@ contract IBAgreement {
 
     modifier onlyGovernor() {
         require(msg.sender == governor, "caller is not the governor");
+        _;
+    }
+
+    modifier marketAllowed(address cy) {
+        require(allowedMarkets[cy], "market not allowed");
         _;
     }
 
@@ -88,15 +94,16 @@ contract IBAgreement {
 
     /**
      * @notice Get the hypothetical debt in USD value of this contract after borrow
+     * @param cy The cyToken
      * @param borrowAmount The hypothetical borrow amount
      * @return The hypothetical debt in USD value
      */
-    function hypotheticalDebtUSD(uint256 borrowAmount)
+    function hypotheticalDebtUSD(ICToken cy, uint256 borrowAmount)
         external
         view
         returns (uint256)
     {
-        return getHypotheticalDebtValue(address(0), borrowAmount);
+        return getHypotheticalDebtValue(address(cy), borrowAmount);
     }
 
     /**
@@ -137,11 +144,7 @@ contract IBAgreement {
      * @param cy The cyToken
      * @param amount The borrow amount
      */
-    function borrow(ICToken cy, uint256 amount) external onlyBorrower {
-        require(
-            allowedMarkets[address(cy)],
-            "market not allowed"
-        );
+    function borrow(ICToken cy, uint256 amount) external nonReentrant onlyBorrower marketAllowed(address(cy)) {
         borrowInternal(cy, amount);
     }
 
@@ -149,11 +152,7 @@ contract IBAgreement {
      * @notice Borrow max from cyToken with current price
      * @param cy The cyToken
      */
-    function borrowMax(ICToken cy) external onlyBorrower {
-        require(
-            allowedMarkets[address(cy)],
-            "market not allowed"
-        );
+    function borrowMax(ICToken cy) external nonReentrant onlyBorrower marketAllowed(address(cy)) {
         (, , uint256 borrowBalance, ) = cy.getAccountSnapshot(address(this));
 
         IPriceOracle oracle = IPriceOracle(comptroller.oracle());
@@ -181,41 +180,26 @@ contract IBAgreement {
      * @param cy The cyToken
      * @param amount The repay amount
      */
-    function repay(ICToken cy, uint256 amount) external {
-        require(
-            allowedMarkets[address(cy)],
-            "market not allowed"
-        );
+    function repay(ICToken cy, uint256 amount) external nonReentrant onlyBorrower marketAllowed(address(cy)) {
         IERC20 underlying = IERC20(cy.underlying());
         underlying.safeTransferFrom(msg.sender, address(this), amount);
         repayInternal(cy, amount);
     }
 
     /**
-     * @notice Seize the accidentally deposited tokens
+     * @notice Seize the tokens
      * @param token The token
      * @param amount The amount
      */
     function seize(IERC20 token, uint256 amount) external onlyExecutor {
-        require(address(token) != address(collateral), "seize collateral not allow");
+        if (address(token) == address(collateral)) {
+            require(
+                this.debtUSD() > this.liquidationThreshold(),
+                "not liquidatable"
+            );
+        }
         token.safeTransfer(executor, amount);
     }
-
-    /**
-     * @notice Seize collateral tokens when debt is under collateralize
-     * @param amount The amount
-     */
-     function seizeCollateral(uint256 amount) external onlyExecutor {
-        require(
-            this.debtUSD() > this.liquidationThreshold(),
-            "not liquidatable"
-        );
-        require(
-            amount * 1e18 / collateral.balanceOf(address(this)) <= 0.5e18,
-            "seize collateral at most 50%"
-        );
-        collateral.safeTransfer(executor, amount);
-     }
 
     /**
      * @notice Set the price feed of the collateral
@@ -233,13 +217,16 @@ contract IBAgreement {
     /**
      * @notice Set the allowed markets mapping
      * @param markets The address of cyTokens
-     * @param state The state of allowance
+     * @param states The states of allowance
      */
-     function setAllowedMarkets(address[] calldata markets, bool[] calldata state) external onlyExecutor {
-         require(markets.length == state.length, "length mismatch");
+     function setAllowedMarkets(address[] calldata markets, bool[] calldata states) external onlyExecutor {
+         require(markets.length == states.length, "length mismatch");
          for (uint256 i = 0; i < markets.length; i++) {
-            allowedMarkets[markets[i]] = state[i];
-            emit AllowedMarketsUpdated(markets[i], state[i]);
+            if (states[i]) {
+                require(comptroller.isMarketListed(markets[i]), "market not listed");
+            }
+            allowedMarkets[markets[i]] = states[i];
+            emit AllowedMarketsUpdated(markets[i], states[i]);
          }
      }
 
