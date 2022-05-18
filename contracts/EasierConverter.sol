@@ -37,15 +37,7 @@ contract EasyConverter {
         sourceToken=_sourceToken;
         destinationToken=_destinationToken;
     }
-
-    /* User functions */
-
-    /*
-     * @notice Burn token for targetToken
-     * @notice This function assumes there exists a token-wrappedNative LP and a wrappedNative-targetToken LP in the dex
-     * @param token The token to be burned
-     * @return Total targetToken sent to receiver after successfully executing this function
-     */
+    
     function convert(uint256 amount) external {
         require(IERC20(sourceToken).balanceOf(address(this)) >= amount, "amount not enough");
         IERC20(sourceToken).safeApprove(uniswapV2Router, amount);
